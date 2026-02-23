@@ -6,7 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 function App() {
   const mapContainer = useRef(null);
   const map = useRef(null);
-
+  const API = "https://gps-web-interface.onrender.com";
   const [simNumber, setSimNumber] = useState("");
 
   // Initialize map
@@ -44,7 +44,7 @@ function App() {
   // Fetch history
   const fetchHistory = async (simNumber) => {
   try {
-    const res = await fetch(`/history/${simNumber}`);
+    const res = await fetch(`${API}/api/location/history/${simNumber}`);
     const data = await res.json();
     return data;
   } catch (err) {
