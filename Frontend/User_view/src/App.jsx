@@ -43,9 +43,15 @@ function App() {
 
   // Fetch history
   const fetchHistory = async (simNumber) => {
+  if (!simNumber) {
+    alert("Enter SIM number");
+    return [];
+  }
+
   try {
     const res = await fetch(`${API}/api/location/history/${simNumber}`);
     const data = await res.json();
+    console.log("Fetched:", data);
     return data;
   } catch (err) {
     console.error("Error fetching history:", err);
@@ -160,11 +166,14 @@ function App() {
           />
 
           <button
-            onClick={fetchHistory}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            Show
-          </button>
+  onClick={async () => {
+    const data = await fetchHistory(simNumber);
+    drawRoute(data);
+  }}
+  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+>
+  Show
+</button>
         </div>
       </div>
 
