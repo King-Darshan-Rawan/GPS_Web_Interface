@@ -1,0 +1,77 @@
+require("dotenv").config();
+const express = require("express");
+const mongoose = require("mongoose");
+const net = require("net"); // TCP module
+const morgan = require("morgan");
+
+const app = express();
+app.use(express.json());
+app.use(morgan("dev"));
+
+// --- CONFIGURATION ---
+const MONGO_URI = process.env.MONGO_URI;
+const HTTP_PORT = 80;
+const TCP_PORT = 8080;
+
+// --- DATABASE CONNECTION ---
+mongoose
+  .connect(MONGO_URI)
+  .then(() => console.log("✅ Connected to MongoDB"))
+  .catch((err) => console.error("❌ MongoDB Error:", err));
+
+// --- DATABASE SCHEMA ---
+const locationSchema = new mongoose.Schema({
+  simNumber: String,
+  lat: Number,
+  lng: Number,
+  timestamp: { type: Date, default: Date.now },
+  receivedAt: { type: Date, default: Date.now },
+});
+const Location = mongoose.model("Location", locationSchema);
+
+// --- 1. EXISTING HTTP API (For Postman/Old Backup) ---
+app.post("/api/location", async (req, res) => {
+  try {
+    const newLoc = new Location(req.body);
+    await newLoc.save();
+    res.status(200).send("OK");
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
+// --- 2. NEW RAW TCP SERVER (For SIM800L Speed & Stability) ---
+// Isme multiple devices ek saath connect ho sakte hain
+const tcpServer = net.createServer((socket) => {
+  socket.on("data", async (data) => {
+    try {
+      const rawStr = data.toString().trim();
+      console.log(`📡 Raw TCP Data: ${rawStr}`); // Expecting format: SIM_NUMBER,LAT,LNG (Example: 8819060069,22.7244,75.8727)
+
+      const [sim, lat, lng] = rawStr.split(",");
+
+      if (sim && lat && lng) {
+        const newLoc = new Location({
+          simNumber: sim,
+          lat: parseFloat(lat),
+          lng: parseFloat(lng),
+        });
+        await newLoc.save();
+        console.log(`✅ Saved TCP data for SIM: ${sim}`);
+        socket.write("ACK\n"); // SIM800L ko confirm karega
+      }
+    } catch (err) {
+      console.error("❌ TCP Parsing Error:", err.message);
+    }
+  });
+
+  socket.on("error", (err) => {
+    console.log("⚠️ Socket Error:", err.message);
+  });
+});
+
+// Start Both Servers
+app.listen(HTTP_PORT, () => console.log(`🚀 HTTP Server on port ${HTTP_PORT}`));
+tcpServer.listen(TCP_PORT, "0.0.0.0", () =>
+  console.log(`🚀 TCP Socket on port ${TCP_PORT}`),
+);
