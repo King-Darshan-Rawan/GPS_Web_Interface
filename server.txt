@@ -1,7 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
-const net = require("net"); // TCP module
+const net = require("net"); 
 const morgan = require("morgan");
 
 const app = express();
@@ -19,46 +19,64 @@ mongoose
   .then(() => console.log("✅ Connected to MongoDB"))
   .catch((err) => console.error("❌ MongoDB Error:", err));
 
-// --- DATABASE SCHEMA ---
+// --- DATABASE SCHEMA (Updated to GeoJSON) ---
 const locationSchema = new mongoose.Schema({
-  simNumber: String,
-  lat: Number,
-  lng: Number,
-  timestamp: { type: Date, default: Date.now },
-  receivedAt: { type: Date, default: Date.now },
-});
-const Location = mongoose.model("Location", locationSchema);
-
-// --- 1. EXISTING HTTP API (For Postman/Old Backup) ---
-app.post("/api/location", async (req, res) => {
-  try {
-    const newLoc = new Location(req.body);
-    await newLoc.save();
-    res.status(200).send("OK");
-  } catch (err) {
-    res.status(500).send(err.message);
+  simNumber: { type: String, required: true, index: true },
+  coordinates: {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], required: true } // [lng, lat]
+  },
+  timestamp: { 
+    type: Date, 
+    default: Date.now,
+    expires: 60 * 60 * 24 * 3 // 3 din baad auto-delete (as per your old schema)
   }
 });
 
-// --- 2. NEW RAW TCP SERVER (For SIM800L Speed & Stability) ---
-// Isme multiple devices ek saath connect ho sakte hain
+// Geo index for MapLibre/Mapbox performance
+locationSchema.index({ coordinates: "2dsphere" });
+const Location = mongoose.model("Location", locationSchema);
+
+// --- 1. HTTP API (History Fetch and Old Support) ---
+app.get("/api/location/history/:simNumber", async (req, res) => {
+  try {
+    const history = await Location.find({ simNumber: req.params.simNumber })
+                                  .sort({ timestamp: 1 });
+    res.json(history);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 2. TCP SERVER (For ESP32 Raw Data) ---
 const tcpServer = net.createServer((socket) => {
   socket.on("data", async (data) => {
     try {
       const rawStr = data.toString().trim();
-      console.log(`📡 Raw TCP Data: ${rawStr}`); // Expecting format: SIM_NUMBER,LAT,LNG (Example: 8819060069,22.7244,75.8727)
+      console.log(`📡 Raw TCP Data Received: ${rawStr}`);
 
-      const [sim, lat, lng] = rawStr.split(",");
+      // ESP sends: SIM,LAT,LNG -> Example: 8819060069,22.7434,75.8994
+      const parts = rawStr.split(",").map(p => p.trim());
+      
+      if (parts.length >= 3) {
+        const sim = parts[0];
+        const lat = parseFloat(parts[1]);
+        const lng = parseFloat(parts[2]);
 
-      if (sim && lat && lng) {
-        const newLoc = new Location({
-          simNumber: sim,
-          lat: parseFloat(lat),
-          lng: parseFloat(lng),
-        });
-        await newLoc.save();
-        console.log(`✅ Saved TCP data for SIM: ${sim}`);
-        socket.write("ACK\n"); // SIM800L ko confirm karega
+        if (!isNaN(lat) && !isNaN(lng)) {
+          // Yahan ho raha hai magic: ESP ka data GeoJSON ban raha hai
+          const newLoc = new Location({
+            simNumber: sim,
+            coordinates: {
+              type: "Point",
+              coordinates: [lng, lat] // [Longitude, Latitude] order for GeoJSON
+            }
+          });
+
+          await newLoc.save();
+          console.log(`✅ GeoJSON Saved for SIM: ${sim}`);
+          socket.write("ACK\n"); // ESP32 needs this acknowledgment
+        }
       }
     } catch (err) {
       console.error("❌ TCP Parsing Error:", err.message);
@@ -70,8 +88,8 @@ const tcpServer = net.createServer((socket) => {
   });
 });
 
-// Start Both Servers
+// Start Servers
 app.listen(HTTP_PORT, () => console.log(`🚀 HTTP Server on port ${HTTP_PORT}`));
 tcpServer.listen(TCP_PORT, "0.0.0.0", () =>
-  console.log(`🚀 TCP Socket on port ${TCP_PORT}`),
+  console.log(`🚀 TCP Socket on port ${TCP_PORT}`)
 );

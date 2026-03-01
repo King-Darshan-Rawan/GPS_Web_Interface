@@ -63,11 +63,9 @@ function App() {
   const drawRoute = (data) => {
   if (!map.current || data.length === 0) return;
 
-  // MongoDB ke lat/lng fields ko MapLibre ke [lng, lat] format mein convert karo
-const coordinates = data.map(loc => [loc.lng, loc.lat]); 
-
-// Filter out invalid coordinates (Optional but safe)
-const validCoordinates = coordinates.filter(coord => !isNaN(coord[0]) && !isNaN(coord[1]));
+  const coordinates = data.map(
+    loc => loc.coordinates.coordinates
+  );
 
   // Remove old layers if exist
   ["route", "points"].forEach(layer => {
